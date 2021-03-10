@@ -458,6 +458,66 @@ namespace MeshLib
 		fin.close();
 		return is_valid();
 	}
+
+	template <typename Real>
+	void Mesh3D<Real>::load_mesh(const std::vector<std::array<double, 3>>& pos, const std::vector<std::vector<size_t>>& indices)
+	{
+		clear_data();
+
+		int vsize, fsize, esize;
+
+
+		//fin >> vsize >> fsize >> esize;
+		vsize = pos.size();
+		fsize = indices.size();
+
+		Real x, y, z;
+		for (int i = 0; i < vsize; i++)
+		{
+			//fin >> x >> y >> z;
+			x = pos[i][0];
+			y = pos[i][1];
+			z = pos[i][2];
+			TinyVector<Real, 3> nvv(x, y, z);
+			insert_vertex(nvv);
+		}
+
+		for (int i = 0; i < fsize; i++)
+		{
+			VERTEX_LIST v_list;
+			int valence = indices[i].size(); 
+			//fin >> valence;
+
+			for (int j = 0; j < valence; j++)
+			{
+				int id = indices[i][j];
+				HE_vert<Real>* hv = get_vertex(id);
+
+				bool findit = false;
+				for (int i = 0; i < (int)v_list.size(); i++)
+				{
+					if (hv == v_list[i])
+					{
+						findit = true;
+						break;
+					}
+				}
+				if (findit == false && hv != NULL)
+				{
+					v_list.push_back(hv);
+				}
+			}
+
+			if ((int)v_list.size() >= 3)
+			{
+				insert_face(v_list);
+			}
+		}
+
+		update_mesh();
+	}
+
+
 	//////////////////////////////////////////////////////////////////////////
 	template <typename Real>
 	void Mesh3D<Real>::write_off(const char *fouts)

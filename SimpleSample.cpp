@@ -87,7 +87,7 @@ int main(int argc, char** argv)
 			("f,feature", "input feature file (fea format)", cxxopts::value<std::string>())
 			("o,output", "output points (ptangle format)", cxxopts::value<std::string>())
 			("a", "angle threshold in degree for detecting features, default(30)", cxxopts::value<double>())
-			("s", "length of line segment for sampling, default(4e-3)", cxxopts::value<double>())
+			("s", "length of line segment for sampling, default(2e-3)", cxxopts::value<double>())
 			("h,help", "print help");
 
 		auto result = options.parse(argc, argv);
@@ -97,7 +97,7 @@ int main(int argc, char** argv)
 			exit(0);
 		}
 		bool flag_feature_flag = true;
-		double len_seg = 4e-3;
+		double len_seg = 2e-3;
 		double th_angle = 30;
 		if (result.count("s"))
 		{
@@ -123,7 +123,13 @@ int main(int argc, char** argv)
 			mesh.load_off(inputfile.c_str());
 		else if (inputext == "ply")
 		{
-			//to do
+			happly::PLYData plyIn(inputfile);
+			std::vector<std::array<double, 3>> vPos = plyIn.getVertexPositions();
+			std::vector<std::vector<size_t>> fInd = plyIn.getFaceIndices<size_t>();
+			mesh.load_mesh(vPos, fInd);
+
+			//test code below
+			//mesh.write_obj("test.obj");
 		}
 		std::cout << "verts: " << mesh.get_vertices_list()->size() << " face:  " << mesh.get_faces_list()->size() << std::endl;
 
@@ -198,6 +204,8 @@ int main(int argc, char** argv)
 		}
 
 		ofs.close();
+
+		//smoothness term
 	}
 	catch (const cxxopts::OptionException& e)
 	{

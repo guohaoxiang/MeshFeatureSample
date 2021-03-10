@@ -12,6 +12,7 @@
 #include <cassert>
 #include <iomanip>
 #include <queue>
+#include <array>
 #include <cstdlib>
 
 #include "TinyVector.h"
@@ -369,6 +370,10 @@ namespace MeshLib
 
 		//! load a 3D mesh from an OFF format file
 		bool load_off(const char *fins);
+		
+		//modified by haoxiang on 03/10/2021
+		void load_mesh(const std::vector<std::array<double, 3>>& pos, const std::vector<std::vector<size_t>>& indices);
+		
 		//! export the current mesh to an OFF format file
 		void write_off(const char *fouts);
 		//! load a 3D mesh from an OBJ format file
