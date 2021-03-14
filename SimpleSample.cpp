@@ -42,9 +42,10 @@ bool load_feature_file(const char* filename, std::vector<std::pair<int, int>>& u
 
 }
 
-void select_features_by_angle(Mesh3d* m, double th_angle, std::vector<std::pair<int, int>> &ungrouped_features)
+void select_features_by_angle(Mesh3d* m, double th_angle, std::vector<std::pair<int, int>> &ungrouped_features, std::vector<int> &ungrouped_feature_eid)
 {
 	ungrouped_features.clear();
+	ungrouped_feature_eid.clear();
 	const double angle = th_angle * 3.1415926535897932384626433832795 / 180;
 	std::vector<bool> he_flag(m->get_num_of_edges(), false);
 	for (size_t i = 0; i < m->get_num_of_edges(); i++)
@@ -57,6 +58,7 @@ void select_features_by_angle(Mesh3d* m, double th_angle, std::vector<std::pair<
 				he_flag[he->id] = true;
 				he_flag[he->pair->id] = true;
 				ungrouped_features.push_back(std::pair<int, int>(he->vert->id, he->pair->vert->id));
+				ungrouped_feature_eid.push_back(he->id);
 			}
 		}
 	}
@@ -87,7 +89,7 @@ int main(int argc, char** argv)
 			("f,feature", "input feature file (fea format)", cxxopts::value<std::string>())
 			("o,output", "output points (ptangle format)", cxxopts::value<std::string>())
 			("a", "angle threshold in degree for detecting features, default(30)", cxxopts::value<double>())
-			("s", "length of line segment for sampling, default(2e-3)", cxxopts::value<double>())
+			("s", "length of line segment for sampling, default(4e-3)", cxxopts::value<double>())
 			("h,help", "print help");
 
 		auto result = options.parse(argc, argv);
@@ -97,7 +99,7 @@ int main(int argc, char** argv)
 			exit(0);
 		}
 		bool flag_feature_flag = true;
-		double len_seg = 2e-3;
+		double len_seg = 4e-3;
 		double th_angle = 30;
 		if (result.count("s"))
 		{
@@ -134,6 +136,7 @@ int main(int argc, char** argv)
 		std::cout << "verts: " << mesh.get_vertices_list()->size() << " face:  " << mesh.get_faces_list()->size() << std::endl;
 
 		std::vector<std::pair<int, int>> ungrouped_features;
+		std::vector<int> ungrouped_feature_eid;
 		if (result.count("f"))
 		{
 			auto& inputfeaturefile = result["f"].as<std::string>();
@@ -142,14 +145,16 @@ int main(int argc, char** argv)
 		else
 		{
 			//select feature by angle
-			select_features_by_angle(&mesh, th_angle, ungrouped_features);
+			select_features_by_angle(&mesh, th_angle, ungrouped_features, ungrouped_feature_eid);
 		}
 		
 		//sample points
 		std::vector<TinyVector<double, 3>> sample_pts;
 		std::vector<double> pts_angle;
-		for (auto& pair : ungrouped_features)
+		//for (auto& pair : ungrouped_features)
+		for (size_t i = 0; i < ungrouped_features.size(); i++)
 		{
+			auto pair = ungrouped_features[i];
 			TinyVector<double, 3> pos0 = mesh.get_vertex(pair.first)->pos;
 			TinyVector<double, 3> pos1 = mesh.get_vertex(pair.second)->pos;
 			double len = (pos0 - pos1).Length();
@@ -157,23 +162,32 @@ int main(int argc, char** argv)
 			{
 				//sample at least one points
 				double angle = 0.0;
-				bool flag = false;
-
-				HE_edge<double>* begin_edge = mesh.get_vertex(pair.first)->edge;
-				HE_edge<double>* edge = begin_edge;
-				do
+				if (ungrouped_feature_eid.empty())
 				{
-					if (edge->vert->id == pair.second)
-					{
-						flag = true;
-						angle = acos(edge->face->normal.Dot(edge->pair->face->normal)) * 180.0 / 3.1415926535897932384626433832795;
-						break;
-					}
+					bool flag = false;
 
-					edge = edge->pair->next;
-				} while (edge != begin_edge);
+					HE_edge<double>* begin_edge = mesh.get_vertex(pair.first)->edge;
+					HE_edge<double>* edge = begin_edge;
+					do
+					{
+						if (edge->vert->id == pair.second)
+						{
+							flag = true;
+							angle = acos(edge->face->normal.Dot(edge->pair->face->normal)) * 180.0 / 3.1415926535897932384626433832795;
+							break;
+						}
+
+						edge = edge->pair->next;
+					} while (edge != begin_edge);
+
+					assert(flag == true);
+				}
+				else
+				{
+					HE_edge<double>* edge = mesh.get_edge(ungrouped_feature_eid[i]);
+					angle = acos(edge->face->normal.Dot(edge->pair->face->normal)) * 180.0 / 3.1415926535897932384626433832795;
+				}
 				
-				assert(flag == true);
 				if (len < len_seg / 2.0)
 				{
 					sample_pts.push_back((pos0 + pos1) / 2.0);
