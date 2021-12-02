@@ -185,9 +185,10 @@ void update_tree_color(const std::vector<size_t>& new_color, TreeNode<size_t>* t
 
 
 
-void get_tree_from_convex_graph(const std::vector<std::set<size_t>> &graph , const std::map<std::pair<size_t, size_t>, bool>& flag_fpconvex, bool flag_convex, TreeNode<size_t>* tn, int layer)
+void get_tree_from_convex_graph(const std::vector<std::set<size_t>> &graph , const std::map<std::pair<size_t, size_t>, int>& flag_fpconvex, bool flag_convex_bool, TreeNode<size_t>* tn, int layer)
 {
 	//set tn
+	int target_convex = 2 - (int)flag_convex_bool;
 	std::set<size_t> counter_nodes;
 	for (size_t i = 0; i < graph.size(); i++)
 	{
@@ -197,7 +198,7 @@ void get_tree_from_convex_graph(const std::vector<std::set<size_t>> &graph , con
 			{
 				auto it = flag_fpconvex.find(std::pair<size_t, size_t>(i, v));
 				assert(it != flag_fpconvex.end());
-				if (it->second != flag_convex)
+				if (it->second != 0 && it->second != target_convex)
 				{
 					counter_nodes.insert(i);
 					counter_nodes.insert(v);
@@ -218,7 +219,7 @@ void get_tree_from_convex_graph(const std::vector<std::set<size_t>> &graph , con
 				{
 					auto it = flag_fpconvex.find(std::pair<size_t, size_t>(std::min(cv, cvn), std::max(cv, cvn)));
 					assert(it != flag_fpconvex.end());
-					if (it->second != flag_convex)
+					if (it->second != target_convex) //including smooth one
 						counter_graph[cv].insert(cvn);
 				}
 			}
@@ -245,7 +246,7 @@ void get_tree_from_convex_graph(const std::vector<std::set<size_t>> &graph , con
 				std::cout << "Layers over 10!!!!!!!!!!!!!!!!!!!!!!!!!!" << std::endl;
 				//exit(EXIT_FAILURE);
 			}
-			get_tree_from_convex_graph(subgraph, flag_fpconvex, !flag_convex, child, layer + 1);
+			get_tree_from_convex_graph(subgraph, flag_fpconvex, !flag_convex_bool, child, layer + 1);
 			tn->children.push_back(child);
 		}
 	}

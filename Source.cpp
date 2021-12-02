@@ -16,6 +16,8 @@
 
 using namespace MeshLib;
 
+double th_smooth_cos_value = 0.866025; //sqrt(3)/2, flat angle is treated as smooth feature
+
 std::string GetFileExtension(const std::string& FileName)
 {
 	if (FileName.find_last_of(".") != std::string::npos)
@@ -71,8 +73,9 @@ void save_conf_file(const char* filename, const std::string str, bool flag_conve
 	ofs.close();
 }
 
-bool check_mesh_edge_convex(Mesh3d* m, HE_edge<double>* he)
+int check_mesh_edge_convex(Mesh3d* m, HE_edge<double>* he)
 {
+	//return 0: smooth, 1: convex, 2: concave
 	int hetri_vertidsum = 0, hepairtri_vertidsum = 0;
 	
 	HE_edge<double>* begin_edge = he;
@@ -94,14 +97,18 @@ bool check_mesh_edge_convex(Mesh3d* m, HE_edge<double>* he)
 	int hetri_otherid = hetri_vertidsum - he->vert->id - he->pair->vert->id;
 	int hepairtri_otherid = hepairtri_vertidsum - he->vert->id - he->pair->vert->id;
 	double product = he->face->normal.Dot(m->get_vertices_list()->at(hetri_otherid)->pos - m->get_vertices_list()->at(hepairtri_otherid)->pos);
+	int res = 0;
 	if (product > 0.0)
 	{
-		return true;
+		res = 1;
+		//return true;
 	}
 	else
 	{
-		return false;
+		res = 2;
+		//return false;
 	}
+	return res;
 }
 
 bool dijkstra_mesh(Mesh3d* m, size_t start_vert, std::vector<size_t>& prev_map, std::vector<double>& dist)
@@ -190,6 +197,7 @@ int main(int argc, char** argv)
 			("csg", "whether generating csg tree for model, default: 0", cxxopts::value<int>())
 			("convex", "whether the first layer is convex, default: 0", cxxopts::value<int>())
 			("r,repair", "whether the feature edges are repaired, default: 1", cxxopts::value<int>())
+			("verbose", "verbose setting, default: 0", cxxopts::value<int>())
 			("h,help", "print help");
 		
 		auto result = options.parse(argc, argv);
@@ -219,6 +227,11 @@ int main(int argc, char** argv)
 		else if (inputext == "off")
 			mesh.load_off(inputfile.c_str());
 		std::cout << "verts: " << mesh.get_vertices_list()->size() << " face:  " << mesh.get_faces_list()->size() << std::endl;
+		bool flag_verbose = false;
+		if (result.count("verbose"))
+		{
+			flag_verbose = (bool)result["verbose"].as<int>();
+		}
 
 		if (processing_mode == 0)
 		{
@@ -340,9 +353,9 @@ int main(int argc, char** argv)
 				else if (feature_v2he[i].size() == 2)
 				{
 					//check edge convex status
-					bool flag_convex_edge0 = check_mesh_edge_convex(&mesh, mesh.get_edges_list()->at(feature_v2he[i][0]));
-					bool flag_convex_edge1 = check_mesh_edge_convex(&mesh, mesh.get_edges_list()->at(feature_v2he[i][1]));
-					if (flag_convex_edge0 != flag_convex_edge1)
+					int flag_convex_edge0 = check_mesh_edge_convex(&mesh, mesh.get_edges_list()->at(feature_v2he[i][0]));
+					int flag_convex_edge1 = check_mesh_edge_convex(&mesh, mesh.get_edges_list()->at(feature_v2he[i][1]));
+					if (flag_convex_edge0 * flag_convex_edge1 != 0 && flag_convex_edge0 != flag_convex_edge1)
 					{
 						std::cout << "input file: " << inputfile << std::endl;
 						std::cout << "turn vertex exists: " << i << std::endl;
@@ -643,12 +656,14 @@ int main(int argc, char** argv)
 				//need to be changed if csg is set as true
 				std::vector<std::set<size_t>> connectivity(cluster_id - 1);
 				//color - 1
+				//here assume faces on both sides of a feature belongs to df patches
 				for (size_t i = 0; i < he_feature_flag.size(); i++)
 				{
 					if (he_feature_flag[i])
 					{
 						HE_edge<double>* e1 = mesh.get_edges_list()->at(i);
 						HE_edge<double>* e2 = e1->pair;
+						if (face_color_init[e1->face->id] == face_color_init[e2->face->id]) continue;
 						connectivity[face_color_init[e1->face->id] - 1].insert(face_color_init[e2->face->id] - 1);
 					}
 				}
@@ -689,7 +704,7 @@ int main(int argc, char** argv)
 				std::vector<std::set<size_t>> connectivity(cluster_id - 1);
 				std::vector<std::set<size_t>> connectivity_v(cluster_id - 1); //connectivity based on vertices
 				std::map<std::pair<size_t, size_t>, double> fp2product;
-				std::map<std::pair<size_t, size_t>, bool> flag_fpconvex;
+				std::map<std::pair<size_t, size_t>, int> flag_fpconvex; //update 1203, 0: smooth, 1: convex, 2:concave
 				//color - 1
 				for (size_t i = 0; i < he_feature_flag.size(); i++)
 				{
@@ -697,7 +712,8 @@ int main(int argc, char** argv)
 					{
 						HE_edge<double>* e1 = mesh.get_edges_list()->at(i);
 						HE_edge<double>* e2 = e1->pair;
-						connectivity[face_color_init[e1->face->id] - 1].insert(face_color_init[e2->face->id] - 1);
+						if (face_color_init[e1->face->id] != face_color_init[e2->face->id])
+							connectivity[face_color_init[e1->face->id] - 1].insert(face_color_init[e2->face->id] - 1);
 						size_t fid1 = face_color_init[e1->face->id], fid2 = face_color_init[e2->face->id]; //starting from zero
 						size_t minfid = std::min(fid1, fid2);
 						size_t maxfid = std::max(fid1, fid2);
@@ -745,12 +761,13 @@ int main(int argc, char** argv)
 							surounding_cs.insert(face_color_init[ve_iter->face->id] -1);
 							ve_iter = ve_iter->pair->next;
 						} while (ve_iter != ve_begin);
-						if (surounding_cs.size() != feature_v2he[i].size())
-						{
-							std::cout << "input file: " << inputfile << std::endl;
-							std::cout << "feature wrong near: " << i << std::endl;
-						}
-						assert(surounding_cs.size() == feature_v2he[i].size());
+						//if (surounding_cs.size() != feature_v2he[i].size())
+						//{
+						//	//update 1201, no longer big deal, because the generix might exists
+						//	std::cout << "input file: " << inputfile << std::endl;
+						//	std::cout << "feature wrong near: " << i << std::endl;
+						//}
+						//assert(surounding_cs.size() == feature_v2he[i].size());
 						std::vector<size_t> surounding_cs_vector(surounding_cs.begin(), surounding_cs.end());
 						for (size_t it = 0; it < surounding_cs_vector.size() - 1; it++)
 						{
@@ -770,31 +787,38 @@ int main(int argc, char** argv)
 				{
 					if (p.second < 0.0)
 					{
-						flag_fpconvex[p.first] = true;
+						//flag_fpconvex[p.first] = true;
+						flag_fpconvex[p.first] = 1;
 					}
 					else
 					{
-						flag_fpconvex[p.first] = false;
+						//flag_fpconvex[p.first] = false;
+						flag_fpconvex[p.first] = 2;
+
 					}
 				}
 
-				//print graph
-				/*std::cout << "dual graph ori:" << std::endl;
-				for (size_t i = 0; i < connectivity.size(); i++)
+				if (flag_verbose)
 				{
-					std::cout << i << ": ";
-					for (auto v : connectivity[i])
+					std::cout << "dual graph ori:" << std::endl;
+					for (size_t i = 0; i < connectivity.size(); i++)
 					{
-						std::cout << v << " ";
+						std::cout << i << ": ";
+						for (auto v : connectivity[i])
+						{
+							std::cout << v << " ";
+						}
+						std::cout << std::endl;
 					}
-					std::cout << std::endl;
+
+					std::cout << "edge convex flag: " << std::endl;
+					for (auto& p : flag_fpconvex)
+					{
+						std::cout << "edge: " << p.first.first << "-" << p.first.second << " : " << p.second << std::endl;
+					}
 				}
+				//print graph
 				
-				std::cout << "edge convex flag: " << std::endl;
-				for (auto& p : flag_fpconvex)
-				{
-					std::cout << "edge: " << p.first.first << "-" << p.first.second << " : " << p.second << std::endl;
-				}*/
 
 				TreeNode<size_t> *tree = new TreeNode<size_t>;
 				;

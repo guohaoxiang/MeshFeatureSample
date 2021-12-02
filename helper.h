@@ -19,7 +19,7 @@ void compute_vert_mean_curvature(const std::vector<TinyVector<double, 3>>& pos, 
 
 void update_tree_color(const std::vector<size_t>& new_color, TreeNode<size_t>* t);
 
-void get_tree_from_convex_graph(const std::vector<std::set<size_t>> &graph, const std::map<std::pair<size_t, size_t>, bool>& flag_fpconvex, bool flag_convex, TreeNode<size_t>* tn, int layer);
+void get_tree_from_convex_graph(const std::vector<std::set<size_t>> &graph, const std::map<std::pair<size_t, size_t>, int>& flag_fpconvex, bool flag_convex, TreeNode<size_t>* tn, int layer);
 
 #include "Mesh3D.h"
 //cluster mesh faces according to feature edges
