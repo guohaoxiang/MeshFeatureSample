@@ -7,6 +7,9 @@
 #include <igl/invert_diag.h>
 #include <igl/readOFF.h>
 
+#define DENOMINATOR_EPS 1e-6
+
+
 void greedy_graph_coloring(const size_t num_vertices, const std::vector<std::set<size_t>>& edges, std::vector<std::vector<size_t>>& colored_vertices)
 {
 	std::vector<int> result(num_vertices, -1);
@@ -265,6 +268,116 @@ bool get_tree_from_convex_graph(const std::vector<std::set<size_t>> &graph , con
 		}
 	}
 	return true;
+}
+
+TinyVector<double, 3> perturb_normal(const TinyVector<double, 3> normal, double angle_noise1, double angle_noise2)
+{
+	//get angle from normal
+	//assume normal is normalized
+	double theta = acos(normal[2]);
+	double phi = acos(normal[0] / (sqrt(1 - normal[2] * normal[2]) + DENOMINATOR_EPS));
+	double phi_ref = asin(normal[1] / (sqrt(1 - normal[2] * normal[2]) + DENOMINATOR_EPS));
+	if (phi_ref < 0)
+		phi = 2 * M_PI - phi;
+	theta = theta + angle_noise1 / 180.0 * M_PI;
+	phi = phi + angle_noise2 / 180.0 * M_PI;
+	TinyVector<double, 3> normal_new;
+	normal_new[0] = sin(theta) * cos(phi);
+	normal_new[1] = sin(theta) * sin(phi);
+	normal_new[2] = cos(theta);
+	return normal_new;
+}
+
+#include <random>
+bool sample_pts_from_mesh(const std::vector<TinyVector<double, 3>>& tri_verts, const std::vector<TinyVector<size_t, 3>>& tri_faces, const std::vector<TinyVector<double, 3>>& tri_normals, const std::vector<int>& tri_face_masks, int n_sample, std::vector<TinyVector<double, 3>>& output_pts, std::vector<TinyVector<double, 3>>& output_normals, std::vector<int>& output_masks, double sigma, double sigma_n)
+{
+	if (tri_faces.empty())
+	{
+		std::cout << "!!!no face input for sampling" << std::endl;
+		return false;
+	}
+	output_pts.clear();
+	output_normals.clear();
+	output_masks.clear();
+	bool flag_pos_noise = (sigma > 0.0);
+	bool flag_normal_noise = (sigma_n > 0.0);
+	//noise to be set
+	if (!flag_pos_noise) sigma = 0.0;
+	if (!flag_normal_noise) sigma_n = 0.0;
+	//feature parts first
+	std::random_device rd;
+	std::mt19937 e2(rd());
+	std::uniform_real_distribution<double> unif_dist(0, 1);
+	//std::normal_distribution<double> normal_dist(0, sigma);
+	std::uniform_real_distribution<double> normal_dist(-sigma, sigma);
+	std::uniform_real_distribution<double> angle_unif_dist(-sigma_n, sigma_n);
+
+	//compute triangles
+	std::vector<double> tri_area(tri_faces.size(), 0.0);
+	double total_tri_area = 0.0;
+	for (size_t i = 0; i < tri_area.size(); i++)
+	{
+		tri_area[i] = std::abs(compute_tri_area<double>(tri_verts[tri_faces[i][0]], tri_verts[tri_faces[i][1]], tri_verts[tri_faces[i][2]]));
+		total_tri_area += tri_area[i];
+	}
+	
+	std::vector<double> tri_bound(tri_area.size() + 1, 0.0);
+	for (size_t i = 0; i < tri_area.size(); i++)
+	{
+		tri_bound[i + 1] = tri_bound[i] + tri_area[i] / total_tri_area;
+	}
+	
+	for (size_t i = 0; i < n_sample; i++)
+	{
+		double u = unif_dist(e2);
+		auto iter = std::upper_bound(tri_bound.begin(), tri_bound.end(), u);
+		int fid = (int)std::distance(tri_bound.begin(), iter);
+		//assert(fid != tri_verts.size() + 1);
+		fid = std::max(0, fid - 1);
+		//sample
+		//int id0 = ungrouped_features[fid].first;
+		//int id1 = ungrouped_features[fid].second;
+		double s = unif_dist(e2);
+		double t = unif_dist(e2);
+		if (s + t > 1)
+		{
+			s = 1 - s;
+			t = 1 - t;
+		}
+		TinyVector<double, 3> facenormal = tri_normals[fid];
+		/*if (result.count("s"))
+			sample_pts.push_back((1.0 - s - t) * vert_pos[tri_verts[fid][0]] + s * vert_pos[tri_verts[fid][1]] + t * vert_pos[tri_verts[fid][2]] + facenormal * normal_dist(e2));
+		else*/
+		if (flag_pos_noise)
+		{
+			output_pts.push_back((1.0 - s - t) * tri_verts[tri_faces[fid][0]] + s * tri_verts[tri_faces[fid][1]] + t * tri_verts[tri_faces[fid][2]] + facenormal * normal_dist(e2));
+		}
+		else
+			output_pts.push_back((1.0 - s - t) * tri_verts[tri_faces[fid][0]] + s * tri_verts[tri_faces[fid][1]] + t * tri_verts[tri_faces[fid][2]]);
+//			sample_pts.push_back((1.0 - s - t) * vert_pos[tri_verts[fid][0]] + s * vert_pos[tri_verts[fid][1]] + t * vert_pos[tri_verts[fid][2]]);
+		//sample_pt_normals.push_back(facenormal);
+		/*if (result.count("sn"))
+		{
+			sample_pt_normals.push_back(perturb_normal(facenormal, angle_unif_dist(e2), angle_unif_dist(e2)));
+		}
+		else*/
+		if (flag_normal_noise)
+		{
+			output_normals.push_back(perturb_normal(facenormal, angle_unif_dist(e2), angle_unif_dist(e2)));
+		}
+		else
+		{
+			//sample_pt_normals.push_back(facenormal);
+			output_normals.push_back(facenormal);
+
+		}
+		//sample mask to be added
+		//assert(face_color[fid] <= n_color);
+		//sample_mask[n_feature_sample + i] = face_color[fid];
+		//sample_mask.push_back(face_color[fid]);
+		output_masks.push_back(tri_face_masks[fid]);
+	}
+
 }
 
 using namespace MeshLib;
