@@ -185,7 +185,7 @@ void update_tree_color(const std::vector<size_t>& new_color, TreeNode<size_t>* t
 
 
 
-void get_tree_from_convex_graph(const std::vector<std::set<size_t>> &graph , const std::map<std::pair<size_t, size_t>, int>& flag_fpconvex, bool flag_convex_bool, TreeNode<size_t>* tn, int layer)
+bool get_tree_from_convex_graph(const std::vector<std::set<size_t>> &graph , const std::map<std::pair<size_t, size_t>, int>& flag_fpconvex, bool flag_convex_bool, TreeNode<size_t>* tn, int layer)
 {
 	//set tn
 	int target_convex = 2 - (int)flag_convex_bool;
@@ -245,8 +245,13 @@ void get_tree_from_convex_graph(const std::vector<std::set<size_t>> &graph , con
 			{
 				std::cout << "Layers over 10!!!!!!!!!!!!!!!!!!!!!!!!!!" << std::endl;
 				//exit(EXIT_FAILURE);
+				return false;
 			}
-			get_tree_from_convex_graph(subgraph, flag_fpconvex, !flag_convex_bool, child, layer + 1);
+			bool tmp_flag = get_tree_from_convex_graph(subgraph, flag_fpconvex, !flag_convex_bool, child, layer + 1);
+			if (!tmp_flag)
+			{
+				return false;
+			}
 			tn->children.push_back(child);
 		}
 	}
@@ -259,6 +264,7 @@ void get_tree_from_convex_graph(const std::vector<std::set<size_t>> &graph , con
 			tn->keys.insert(i);
 		}
 	}
+	return true;
 }
 
 using namespace MeshLib;

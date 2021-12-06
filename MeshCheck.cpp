@@ -62,15 +62,20 @@ int main(int argc, char** argv)
 		.allow_unrecognised_options()
 		.add_options()
 		("i,input", "input mesh (obj/off format)", cxxopts::value<std::string>())
-		("o,output", "output file", cxxopts::value<std::string>())
+		//("o,output", "output file", cxxopts::value<std::string>())
 		("f,feature", "input feature (obj/off format)", cxxopts::value<std::string>())
 		("h,help", "print help");
 	
 	auto result = options.parse(argc, argv);
 
+	if (result.count("help"))
+	{
+		std::cout << options.help({ "", "Group" }) << std::endl;
+		exit(0);
+	}
 	std::string inputfile = result["i"].as<std::string>();
 	std::string inputext = GetFileExtension(inputfile);
-	auto& outputfile = result["o"].as<std::string>();
+	//auto& outputfile = result["o"].as<std::string>();
 	Mesh3d mesh;
 	if (inputext == "obj")
 		mesh.load_obj(inputfile.c_str());
@@ -105,9 +110,17 @@ int main(int argc, char** argv)
 	}
 
 	//ofs
-	std::ofstream ofs;
+	/*std::ofstream ofs;
 	ofs.open(outputfile, std::ofstream::out | std::ofstream::app);
 	ofs << inputfile << std::endl;
-	ofs << flag_legal << std::endl;
+	ofs << flag_legal << std::endl;*/
+
+	//modified 1203
+	if (!flag_legal)
+	{
+		std::ofstream ofs(inputfile + "mesh_invalid");
+		ofs.close();
+	}
+
 	return 1;
 }

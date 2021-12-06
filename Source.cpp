@@ -16,7 +16,9 @@
 
 using namespace MeshLib;
 
-double th_smooth_cos_value = 0.866025; //sqrt(3)/2, flat angle is treated as smooth feature
+//double th_smooth_cos_value = 0.866025; //sqrt(3)/2, flat angle is treated as smooth feature
+
+double th_smooth_cos_value = 0.939692; //cos(20)
 
 std::string GetFileExtension(const std::string& FileName)
 {
@@ -97,14 +99,17 @@ int check_mesh_edge_convex(Mesh3d* m, HE_edge<double>* he)
 	int hetri_otherid = hetri_vertidsum - he->vert->id - he->pair->vert->id;
 	int hepairtri_otherid = hepairtri_vertidsum - he->vert->id - he->pair->vert->id;
 	double product = he->face->normal.Dot(m->get_vertices_list()->at(hetri_otherid)->pos - m->get_vertices_list()->at(hepairtri_otherid)->pos);
+	double face_cos_value = he->face->normal.Dot(he->pair->face->normal);
 	int res = 0;
 	if (product > 0.0)
 	{
-		res = 1;
+		if (face_cos_value < th_smooth_cos_value)
+			res = 1;
 		//return true;
 	}
 	else
 	{
+		if (face_cos_value < th_smooth_cos_value)
 		res = 2;
 		//return false;
 	}
@@ -198,6 +203,7 @@ int main(int argc, char** argv)
 			("convex", "whether the first layer is convex, default: 0", cxxopts::value<int>())
 			("r,repair", "whether the feature edges are repaired, default: 1", cxxopts::value<int>())
 			("verbose", "verbose setting, default: 0", cxxopts::value<int>())
+			("strict", "treat all edges as either strictly convex or concave")
 			("h,help", "print help");
 		
 		auto result = options.parse(argc, argv);
@@ -231,6 +237,12 @@ int main(int argc, char** argv)
 		if (result.count("verbose"))
 		{
 			flag_verbose = (bool)result["verbose"].as<int>();
+		}
+		
+		bool flag_strict = false;
+		if (result.count("strict"))
+		{
+			flag_strict = true;
 		}
 
 		if (processing_mode == 0)
@@ -287,6 +299,9 @@ int main(int argc, char** argv)
 			bool flag_repair_features = true;
 			if (result.count("r"))
 				flag_repair_features = result["r"].as<int>();
+			
+			if (result.count("csg"))
+				flag_csg = result["csg"].as<int>();
 
 			//at least sample points with the same shape as face
 			if (n_nonfeature_sample < mesh.get_num_of_faces())
@@ -299,6 +314,13 @@ int main(int argc, char** argv)
 			std::vector<std::pair<int, int>> ungrouped_features;
 			load_feature_file(inputfeaturefile.c_str(), ungrouped_features);
 			std::vector<TinyVector<double, 3>> sample_pts, sample_pt_normals;
+
+			//skip elements with no features
+			if (flag_csg && ungrouped_features.empty())
+			{
+				std::cout << "empty feature file: " << inputfeaturefile << std::endl;
+				return 1;
+			}
 
 			//feature check: no hanging feature
 			//std::vector<size_t> feature_degree_v(mesh.get_num_of_vertices(), 0);
@@ -336,6 +358,36 @@ int main(int argc, char** argv)
 			if (ungrouped_features.size() != ungrouped_features_new.size())
 				ungrouped_features = ungrouped_features_new;
 
+			////for debugging, save all smooth feature
+			//std::vector<std::pair<int, int>> smooth_fea;
+			//for (size_t i = 0; i < mesh.get_num_of_vertices(); i++)
+			//{
+			//	
+			//	if (feature_v2he[i].size() == 2)
+			//	{
+			//		//check edge convex status
+			//		int flag_convex_edge0 = check_mesh_edge_convex(&mesh, mesh.get_edges_list()->at(feature_v2he[i][0]));
+			//		int flag_convex_edge1 = check_mesh_edge_convex(&mesh, mesh.get_edges_list()->at(feature_v2he[i][1]));
+			//		if (flag_convex_edge0 == 0)
+			//		{
+			//			smooth_fea.push_back(std::pair<int, int>(mesh.get_edges_list()->at(feature_v2he[i][0])->vert->id, mesh.get_edges_list()->at(feature_v2he[i][0])->pair->vert->id));
+			//		}
+
+			//		if (flag_convex_edge1 == 0)
+			//		{
+			//			smooth_fea.push_back(std::pair<int, int>(mesh.get_edges_list()->at(feature_v2he[i][1])->vert->id, mesh.get_edges_list()->at(feature_v2he[i][1])->pair->vert->id));
+			//		}
+			//	}
+			//}
+			//std::ofstream  ofs("smooth.fea");
+			//ofs << smooth_fea.size() << std::endl;
+			//for (size_t i = 0; i < smooth_fea.size(); i++)
+			//{
+			//	ofs << smooth_fea[i].first << " " << smooth_fea[i].second << std::endl;
+			//}
+			//
+			//ofs.close();
+			
 
 			std::vector<size_t> turn_verts, hanging_verts;
 
@@ -643,8 +695,7 @@ int main(int argc, char** argv)
 			if (result.count("c"))
 				flag_coloring = result["c"].as<int>();
 
-			if (result.count("csg"))
-				flag_csg = result["csg"].as<int>();
+			
 
 			bool flag_first_convex = false;
 			if (result.count("convex"))
@@ -704,6 +755,10 @@ int main(int argc, char** argv)
 				std::vector<std::set<size_t>> connectivity(cluster_id - 1);
 				std::vector<std::set<size_t>> connectivity_v(cluster_id - 1); //connectivity based on vertices
 				std::map<std::pair<size_t, size_t>, double> fp2product;
+				
+				//update 1203, construct csg tree by voting
+				std::map<std::pair<size_t, size_t>, std::array<int, 3>> fp2count;
+				
 				std::map<std::pair<size_t, size_t>, int> flag_fpconvex; //update 1203, 0: smooth, 1: convex, 2:concave
 				//color - 1
 				for (size_t i = 0; i < he_feature_flag.size(); i++)
@@ -734,6 +789,37 @@ int main(int argc, char** argv)
 						else
 						{
 							fp2product[tmp_pair] += product;
+						}
+						
+						double tmp_cos = e1->face->normal.Dot(e2->face->normal);
+						if (fp2count.find(tmp_pair) == fp2count.end())
+						{
+							fp2count[tmp_pair] = std::array<int, 3>({ 0, 0, 0 });
+						}
+						
+						if (product < 0.0)
+						{
+							//convex
+							if (tmp_cos < th_smooth_cos_value)
+							{
+								fp2count[tmp_pair][1]++;
+							}
+							else
+							{
+								fp2count[tmp_pair][0]++;
+							}
+						}
+						else
+						{
+							//concave
+							if (tmp_cos < th_smooth_cos_value)
+							{
+								fp2count[tmp_pair][2]++;
+							}
+							else
+							{
+								fp2count[tmp_pair][0]++;
+							}
 						}
 					}
 				}
@@ -783,20 +869,42 @@ int main(int argc, char** argv)
 				}
 				
 
-				for (auto& p : fp2product)
+				if (flag_strict)
 				{
-					if (p.second < 0.0)
+					for (auto& p : fp2product)
 					{
-						//flag_fpconvex[p.first] = true;
-						flag_fpconvex[p.first] = 1;
-					}
-					else
-					{
-						//flag_fpconvex[p.first] = false;
-						flag_fpconvex[p.first] = 2;
+						if (p.second < 0.0)
+						{
+							//flag_fpconvex[p.first] = true;
+							flag_fpconvex[p.first] = 1;
+						}
+						else
+						{
+							//flag_fpconvex[p.first] = false;
+							flag_fpconvex[p.first] = 2;
 
+						}
 					}
 				}
+				else
+				{
+					//not struct version
+					for (auto& p : fp2count)
+					{
+						int maxid = -1, max_num = -1;
+						for (size_t ii = 0; ii < 3; ii++)
+						{
+							if (p.second[ii] > max_num)
+							{
+								max_num = p.second[ii];
+								maxid = ii;
+							}
+						}
+						flag_fpconvex[p.first] = maxid;
+					}
+				}
+
+				
 
 				if (flag_verbose)
 				{
@@ -827,9 +935,12 @@ int main(int argc, char** argv)
 
 				std::vector<std::set<size_t>> components;
 				get_graph_component(connectivity, components);
+
+				bool flag_construct_tree = true;
+
 				if (components.size() == 1)
 				{ 
-					get_tree_from_convex_graph(connectivity, flag_fpconvex, true, tree, 0);
+					flag_construct_tree = get_tree_from_convex_graph(connectivity, flag_fpconvex, true, tree, 0);
 				}
 				else
 				{
@@ -848,9 +959,14 @@ int main(int argc, char** argv)
 							}
 						}
 						TreeNode<size_t>* child = new TreeNode<size_t>;
-						get_tree_from_convex_graph(subgraph, flag_fpconvex, !flag_convex, child, 1);
+						flag_construct_tree = get_tree_from_convex_graph(subgraph, flag_fpconvex, !flag_convex, child, 1);
 						tree->children.push_back(child);
 					}
+				}
+
+				if (!flag_construct_tree)
+				{
+					std::cout << "tree construction failed for model " << inputfile << std::endl;
 				}
 
 				//TreeNode<size_t>* tree_concave = new TreeNode<size_t>;
