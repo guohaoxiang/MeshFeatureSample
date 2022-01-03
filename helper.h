@@ -5,6 +5,14 @@
 #include "TinyVector.h"
 #include "Tree.h"
 
+#define th_smooth_cos_value 0.939692
+
+////double th_smooth_cos_value = 0.866025; //sqrt(3)/2, flat angle is treated as smooth feature
+//
+//double th_smooth_cos_value = 0.939692; //cos(20)
+//
+////double th_smooth_cos_value = 0.5; //cos(60)
+
 void greedy_graph_coloring(const size_t num_vertices, const std::vector<std::set<size_t>>& edges, std::vector<std::vector<size_t>>& colored_vertices);
 
 void get_graph_component(const std::vector<std::set<size_t>>& edges, std::vector<std::set<size_t>>& components);
@@ -19,7 +27,8 @@ void compute_vert_mean_curvature(const std::vector<TinyVector<double, 3>>& pos, 
 
 void update_tree_color(const std::vector<size_t>& new_color, TreeNode<size_t>* t);
 
-bool get_tree_from_convex_graph(const std::vector<std::set<size_t>> &graph, const std::map<std::pair<size_t, size_t>, int>& flag_fpconvex, bool flag_convex, TreeNode<size_t>* tn, int layer);
+bool get_tree_from_convex_graph(const std::vector<std::set<size_t>> &graph, const std::map<std::pair<size_t, size_t>, int>& flag_fpconvex, bool flag_convex, TreeNode<size_t>* tn, int layer, std::vector<size_t> &invalid_graphs);
+
 
 TinyVector<double, 3> perturb_normal(const TinyVector<double, 3> normal, double angle_noise1, double angle_noise2);
 
@@ -32,3 +41,15 @@ int cluster_mesh_faces(Mesh3d* m, const std::vector<bool>& he_feature_flag, std:
 
 void get_cluster_from_coloring(const std::vector<int>& face_color, int color_start_id, std::vector<std::vector<int>>& face_clusters);
 int merge_clusters(Mesh3d* m, const std::vector<bool>& he_feature_flag, int cluster_start_id, int n_cluster, const std::vector<std::pair<int, int>>& feature_twoface_colors, std::vector<int>& face_color);
+
+int get_mesh_edge_type(Mesh3d& m, int heid); //0: smooth, 1: convex, 2: concave
+
+void get_all_tri_area(Mesh3d& m, std::vector<double>& area);
+void get_mesh_vert_faces(Mesh3d& m, std::vector<std::array<double, 3>>& pos, std::vector<std::vector<size_t>>& faces);
+bool dijkstra_mesh(Mesh3d* m, size_t start_vert, std::vector<size_t>& prev_map, std::vector<double>& dist);
+void repair_tree_features(Mesh3d& m, const std::vector<int>& face_color, const std::vector<size_t>& invalid_colors, std::vector<std::pair<int, int>>& ungrouped_features);
+
+void repair_tree_features_maxflow(Mesh3d& m, const std::vector<int>& face_color, const std::vector<size_t>& invalid_colors, std::vector<std::pair<int, int>>& ungrouped_features);
+
+typedef TinyVector<double, 3> vec3d;
+bool load_xyz_file(const char* filename, std::vector<vec3d>& pts, std::vector<vec3d>& normals);

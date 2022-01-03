@@ -7,6 +7,7 @@ project (SimpleSample)
 set(SOURCES
     SimpleSample.cpp
     Mesh3D.cpp
+    MaxFlow.cpp
 )
 
 #SET(CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE  ${CMAKE_SOURCE_DIR}/Bin)
