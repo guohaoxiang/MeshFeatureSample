@@ -689,7 +689,8 @@ void repair_tree_features(Mesh3d& m, const std::vector<int>& face_color, const s
 
 void repair_tree_features_maxflow(Mesh3d& m, const std::vector<int>& face_color, const std::vector<size_t>& invalid_colors, std::vector<std::pair<int, int>>& ungrouped_features)
 {
-	bool flag_debug = true;
+	//bool flag_debug = true;
+	bool flag_debug = false;
 	std::set<std::pair<int, int>> ungrouped_features_set;
 	for (auto& pp : ungrouped_features)
 	{

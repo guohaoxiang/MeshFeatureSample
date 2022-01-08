@@ -766,10 +766,14 @@ int main(int argc, char** argv)
 				std::map<std::pair<size_t, size_t>, double> fp2product;
 				
 				//update 1203, construct csg tree by voting
-				std::map<std::pair<size_t, size_t>, std::array<int, 3>> fp2count;
+				//std::map<std::pair<size_t, size_t>, std::array<int, 3>> fp2count;
 				
 				std::map<std::pair<size_t, size_t>, int> flag_fpconvex; //update 1203, 0: smooth, 1: convex, 2:concave
 				//color - 1
+				
+				//update 0104, face pair convexity is determined by grouped edges
+				std::vector<std::array<int, 3>> ge2count(grouped_features.size(), std::array<int, 3>{0, 0, 0});
+				std::map<std::pair<size_t, size_t>, std::set<int>> fp2ge; //face pair to grouped edges
 				for (size_t i = 0; i < he_feature_flag.size(); i++)
 				{
 					if (he_feature_flag[i])
@@ -803,21 +807,33 @@ int main(int argc, char** argv)
 						}
 						
 						double tmp_cos = e1->face->normal.Dot(e2->face->normal);
-						if (fp2count.find(tmp_pair) == fp2count.end())
+						//if (fp2count.find(tmp_pair) == fp2count.end())
+
+						
+						/*if (ge2count.find(tmp_pair) == ge2count.end())
 						{
 							fp2count[tmp_pair] = std::array<int, 3>({ 0, 0, 0 });
+						}*/
+
+						int gid = he2gid[i];
+						if (fp2ge.find(tmp_pair) == fp2ge.end())
+						{
+							fp2ge[tmp_pair] = std::set<int>();
 						}
+						fp2ge[tmp_pair].insert(gid);
 						
 						if (product < 0.0)
 						{
 							//convex
 							if (tmp_cos < th_smooth_cos_value)
 							{
-								fp2count[tmp_pair][1]++;
+								//fp2count[tmp_pair][1]++;
+								ge2count[gid][1]++;
 							}
 							else
 							{
-								fp2count[tmp_pair][0]++;
+								//fp2count[tmp_pair][0]++;
+								ge2count[gid][0]++;
 							}
 						}
 						else
@@ -825,11 +841,11 @@ int main(int argc, char** argv)
 							//concave
 							if (tmp_cos < th_smooth_cos_value)
 							{
-								fp2count[tmp_pair][2]++;
+								ge2count[gid][2]++;
 							}
 							else
 							{
-								fp2count[tmp_pair][0]++;
+								ge2count[gid][0]++;
 							}
 						}
 					}
@@ -900,7 +916,7 @@ int main(int argc, char** argv)
 				else
 				{
 					//not struct version
-					for (auto& p : fp2count)
+					/*for (auto& p : fp2count)
 					{
 						int maxid = -1, max_num = -1;
 						for (size_t ii = 0; ii < 3; ii++)
@@ -912,7 +928,77 @@ int main(int argc, char** argv)
 							}
 						}
 						flag_fpconvex[p.first] = maxid;
+					}*/
+
+					//update 0104, get face pair connectivity by grouped edges
+					bool flag_valid_seg = true;
+					std::set<size_t> invalid_seg_patches;
+					std::vector<int> ge2convex(grouped_features.size(), 0);
+					for (size_t i = 0; i < grouped_features.size(); i++)
+					{
+						int maxid = -1, max_num = -1;
+						for (size_t ii = 0; ii < 3; ii++)
+						{
+							if (ge2count[i][ii] > max_num)
+							{
+								max_num = ge2count[i][ii];
+								maxid = ii;
+							}
+						}
+						ge2convex[i] = maxid;
 					}
+					
+
+
+					for (auto& p : fp2ge)
+					{
+						std::set<int> cur_strict_convex_types;
+
+						for (auto gid : p.second)
+						{
+							if (ge2convex[gid] != 0)
+								cur_strict_convex_types.insert(ge2convex[gid]);
+						}
+
+
+						if (cur_strict_convex_types.size() >= 2)
+						{
+							flag_valid_seg = false;
+							invalid_seg_patches.insert(p.first.first);
+							invalid_seg_patches.insert(p.first.second);
+						}
+						else if (cur_strict_convex_types.size() == 0)
+						{
+							flag_fpconvex[p.first] = 0; //smooth
+						}
+						else
+						{
+							//only one left
+							flag_fpconvex[p.first] = *cur_strict_convex_types.begin();
+						}
+					}
+
+					if (!flag_valid_seg)
+					{
+						std::ofstream ofs(inputfile + "treefail");
+						ofs.close();
+						std::cout << "invalid segmentation " << output_prefix << std::endl;
+						repair_tree_features_maxflow(mesh, face_color, std::vector<size_t>(invalid_seg_patches.begin(), invalid_seg_patches.end()), ungrouped_features);
+
+						ofs.open(output_prefix + "_fixtree.fea");
+						ofs << ungrouped_features.size() << std::endl;
+						for (auto& pp : ungrouped_features)
+						{
+							ofs << pp.first << " " << pp.second << std::endl;
+						}
+						ofs.close();
+
+						mesh.write_obj((output_prefix + "_fixtree.obj").c_str());
+
+
+						return 1;
+					}
+
 				}
 
 				
@@ -952,6 +1038,15 @@ int main(int argc, char** argv)
 				if (components.size() == 1)
 				{ 
 					flag_construct_tree = get_tree_from_convex_graph(connectivity, flag_fpconvex, true, tree, 0, invalid_subgraph);
+					
+					if (!flag_construct_tree)
+					{
+						delete tree;
+						tree = new TreeNode<size_t>;
+						invalid_subgraph.clear();
+						flag_construct_tree = get_tree_from_convex_graph(connectivity, flag_fpconvex, false, tree, 0, invalid_subgraph);
+
+					}
 				}
 				else
 				{
