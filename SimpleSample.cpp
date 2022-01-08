@@ -8,6 +8,9 @@
 #define SHORTEST_EDGE_LENGTH 1e-6
 
 
+#define th_smooth_cos_value 0.939692 //for grouping case, this angle is used to distinguish sharp and non-sharp feauture
+
+
 using namespace MeshLib;
 
 std::string GetFileExtension(const std::string& FileName)
@@ -75,6 +78,237 @@ void output_pts_xyz(const std::vector<TinyVector<double, 3>>& pts, const char* f
 	ofs.close();
 }
 
+void get_grouped_edges(Mesh3d& mesh, const std::vector<bool>& he_feature_flag, const std::vector<std::vector<int>>& feature_v2he, std::vector<std::vector<int>>& grouped_features, std::vector<int>& he2gid)
+{
+	grouped_features.clear();
+	he2gid.clear();
+	he2gid.resize(mesh.get_num_of_edges(), -1);
+	int groupid = 0;
+	while (true)
+	{
+		int first_he = -1;
+		for (size_t i = 0; i < he_feature_flag.size(); i++)
+		{
+			if (he_feature_flag[i] && he2gid[i] == -1)
+			{
+				first_he = i;
+				break;
+			}
+		}
+		if (first_he == -1)
+		{
+			break;
+		}
+
+		std::vector<int> onegroup;
+		std::queue<size_t> q;
+		q.push(first_he);
+		he2gid[first_he] = groupid;
+		he2gid[mesh.get_edges_list()->at(first_he)->pair->id] = groupid;
+		while (!q.empty())
+		{
+			size_t curhe = q.front();
+			onegroup.push_back(curhe);
+			q.pop();
+			size_t curhe_pair = mesh.get_edges_list()->at(curhe)->pair->id;
+			std::vector<size_t> twoverts;
+			twoverts.push_back(mesh.get_edges_list()->at(curhe)->vert->id);
+			twoverts.push_back(mesh.get_edges_list()->at(curhe)->pair->vert->id);
+			std::vector<size_t> twoedges;
+			twoedges.push_back(curhe_pair);
+			twoedges.push_back(curhe);
+			for (size_t i = 0; i < 2; i++)
+			{
+				//only accept points with degree 2
+				if (feature_v2he[twoverts[i]].size() == 2)
+				{
+					assert(twoedges[i] == feature_v2he[twoverts[i]][0] || twoedges[i] == feature_v2he[twoverts[i]][1]);
+					size_t other_he = feature_v2he[twoverts[i]][0] + feature_v2he[twoverts[i]][1] - twoedges[i];
+					if (he2gid[other_he] == -1)
+					{
+						q.push(other_he);
+						he2gid[other_he] = groupid;
+						he2gid[mesh.get_edges_list()->at(other_he)->pair->id] = groupid;
+					}
+				}
+			}
+		}
+		grouped_features.push_back(onegroup);
+		groupid++;
+	}
+}
+
+void select_real_sharp_features(Mesh3d& mesh, std::vector<std::pair<int, int>>& ungrouped_features)
+{
+	//std::vector<bool> he_feature_flag;
+	std::vector<bool> he_feature_flag(mesh.get_edges_list()->size(), false);
+
+	//std::vector<std::vector<int>> feature_v2he;
+	std::vector<std::vector<int>> feature_v2he(mesh.get_num_of_vertices()); //id of hes ematating from each vertex
+
+	for (size_t i = 0; i < ungrouped_features.size(); i++)
+	{
+		int id0 = ungrouped_features[i].first;
+		int id1 = ungrouped_features[i].second;
+		//feature_degree_v[id0]++;
+		//feature_degree_v[id1]++;
+
+		HE_edge<double>* begin_edge = mesh.get_vertices_list()->at(id0)->edge;
+		HE_edge<double>* edge = mesh.get_vertices_list()->at(id0)->edge;
+		bool flag_found = false;
+		do
+		{
+			if (id1 == edge->vert->id)
+			{
+				feature_v2he[id0].push_back(edge->id);
+				feature_v2he[id1].push_back(edge->pair->id);
+				flag_found = true;
+				break;
+			}
+			edge = edge->pair->next;
+		} while (edge != begin_edge);
+		//assert(flag_found == true);
+	}
+
+	std::vector<std::vector<int>> grouped_features;
+	std::vector<int> he2gid;
+
+	std::vector<TinyVector<size_t, 3>> tri_verts(mesh.get_faces_list()->size());
+	std::vector<TinyVector<double, 3>> tri_normals;
+	//get tri list
+	for (size_t i = 0; i < mesh.get_faces_list()->size(); i++)
+	{
+		HE_edge<double>* begin_edge = mesh.get_faces_list()->at(i)->edge;
+		HE_edge<double>* edge = mesh.get_faces_list()->at(i)->edge;
+		int local_id = 0;
+		do
+		{
+			tri_verts[i][local_id++] = edge->pair->vert->id;
+			edge = edge->next;
+		} while (edge != begin_edge);
+		//mesh.get_faces_list()->at(fid)->normal;
+		tri_normals.push_back(mesh.get_faces_list()->at(i)->normal);
+	}
+	std::vector<TinyVector<double, 3>> vert_pos;
+	for (size_t i = 0; i < mesh.get_vertices_list()->size(); i++)
+	{
+		vert_pos.push_back(mesh.get_vertices_list()->at(i)->pos);
+	}
+
+	//step1: get he_feature_flag
+	for (size_t i = 0; i < ungrouped_features.size(); i++)
+	{
+		int id0 = ungrouped_features[i].first;
+		int id1 = ungrouped_features[i].second;
+		//iterate over all verts emanating from id0
+		HE_edge<double>* edge = mesh.get_vertices_list()->at(id0)->edge;
+		do
+		{
+			if (edge->vert->id == id1)
+			{
+				break;
+			}
+			edge = edge->pair->next;
+		} while (edge != mesh.get_vertices_list()->at(id0)->edge);
+		//assert(edge->vert->id == id1);
+		if (edge->vert->id == id1)
+		{
+			he_feature_flag[edge->id] = true;
+			he_feature_flag[edge->pair->id] = true;
+		}
+	}
+	//step 2: get grouped feature
+	get_grouped_edges(mesh, he_feature_flag, feature_v2he, grouped_features, he2gid);
+	//step 3: select real sharp features
+	std::vector<std::pair<int, int>> ungrouped_features_update;
+	std::vector<std::array<int, 3>> ge2count(grouped_features.size(), std::array<int, 3>{0, 0, 0});
+	for (size_t i = 0; i < he_feature_flag.size(); i++)
+	{
+		if (he_feature_flag[i])
+		{
+			HE_edge<double>* e1 = mesh.get_edges_list()->at(i);
+			HE_edge<double>* e2 = e1->pair;
+
+			//triangle face
+			size_t tfid1 = e1->face->id, tfid2 = e2->face->id;
+			size_t ev1 = e1->vert->id, ev2 = e2->vert->id;
+			size_t tv1 = tri_verts[tfid1][0] + tri_verts[tfid1][1] + tri_verts[tfid1][2] - ev1 - ev2;
+			size_t tv2 = tri_verts[tfid2][0] + tri_verts[tfid2][1] + tri_verts[tfid2][2] - ev1 - ev2;
+			double product = e1->face->normal.Dot(vert_pos[tv2] - vert_pos[tv1]);
+
+
+			double tmp_cos = e1->face->normal.Dot(e2->face->normal);
+			//if (fp2count.find(tmp_pair) == fp2count.end())
+
+
+			/*if (ge2count.find(tmp_pair) == ge2count.end())
+			{
+				fp2count[tmp_pair] = std::array<int, 3>({ 0, 0, 0 });
+			}*/
+
+			int gid = he2gid[i];
+
+			if (product < 0.0)
+			{
+				//convex
+				if (tmp_cos < th_smooth_cos_value)
+				{
+					//fp2count[tmp_pair][1]++;
+					ge2count[gid][1]++;
+				}
+				else
+				{
+					//fp2count[tmp_pair][0]++;
+					ge2count[gid][0]++;
+				}
+			}
+			else
+			{
+				//concave
+				if (tmp_cos < th_smooth_cos_value)
+				{
+					ge2count[gid][2]++;
+				}
+				else
+				{
+					ge2count[gid][0]++;
+				}
+			}
+		}
+
+		//grouped feature no duplicate
+	}
+
+	std::vector<int> ge2convex(grouped_features.size(), 0);
+	for (size_t i = 0; i < grouped_features.size(); i++)
+	{
+		int maxid = -1, max_num = -1;
+		for (size_t ii = 0; ii < 3; ii++)
+		{
+			if (ge2count[i][ii] > max_num)
+			{
+				max_num = ge2count[i][ii];
+				maxid = ii;
+			}
+		}
+		ge2convex[i] = maxid;
+		if (maxid != 0)
+		//if (true)
+		{
+			//sharp features
+			//std::cout << i << " grouped feature size: " << grouped_features[i].size() << std::endl;
+			for (auto eid : grouped_features[i])
+			{
+				int v0 = mesh.get_edge(eid)->vert->id;
+				int v1 = mesh.get_edge(eid)->pair->vert->id;
+				ungrouped_features_update.push_back(std::pair<int, int>(v0, v1));
+			}
+		}
+	}
+
+	ungrouped_features = ungrouped_features_update;
+}
+
 int main(int argc, char** argv)
 {
 	try
@@ -90,6 +324,7 @@ int main(int argc, char** argv)
 			("o,output", "output points (ptangle format)", cxxopts::value<std::string>())
 			("a", "angle threshold in degree for detecting features, default(30)", cxxopts::value<double>())
 			("s", "length of line segment for sampling, default(4e-3)", cxxopts::value<double>())
+			("g,group", "group feature edge");
 			("h,help", "print help");
 
 		auto result = options.parse(argc, argv);
@@ -101,6 +336,7 @@ int main(int argc, char** argv)
 		bool flag_feature_flag = true;
 		double len_seg = 4e-3;
 		double th_angle = 30;
+		bool flag_group_features = false; //group input feature to decide its convexity
 		if (result.count("s"))
 		{
 			len_seg = result["s"].as<double>();
@@ -109,6 +345,11 @@ int main(int argc, char** argv)
 		{
 			//angle is used only when no feature files are given
 			th_angle = result["a"].as<double>();
+		}
+
+		if (result.count("g"))
+		{
+			flag_group_features = true;
 		}
 
 		auto& inputfile = result["i"].as<std::string>();
@@ -141,6 +382,12 @@ int main(int argc, char** argv)
 		{
 			auto& inputfeaturefile = result["f"].as<std::string>();
 			load_feature_file(inputfeaturefile.c_str(), ungrouped_features);
+
+			if (flag_group_features)
+			{
+				//repair and group features
+				select_real_sharp_features(mesh, ungrouped_features);
+			}
 		}
 		else
 		{
